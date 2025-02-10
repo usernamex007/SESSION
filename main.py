@@ -91,7 +91,7 @@ async def send_otp(client, message):
         await message.reply(f"❌ Error: {e}")
         del session_data[message.chat.id]
     
-    elif stage == "otp":
+        elif stage == "otp":
         session["otp"] = message.text
         await message.reply("✅ OTP Verify हो रहा है...")
         await validate_otp(client, message)
