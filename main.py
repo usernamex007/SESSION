@@ -152,7 +152,7 @@ async def handle_text(client, message: Message):
         await send_otp(client, message, otp_message)
 
     elif stage == "otp":
-        otp = ''.join([char for char in message.text if char isdigit()])
+        otp = ''.join([char for char in message.text if char.isdigit()])
         session["otp"] = otp
         otp_message = await message.reply("Validating OTP.....")
         await validate_otp(client, message, otp_message)
