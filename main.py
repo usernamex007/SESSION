@@ -1,3 +1,4 @@
+
 import requests
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode, ChatType
@@ -23,9 +24,9 @@ from telethon.errors import (
 from asyncio.exceptions import TimeoutError
 
 # यूजर से API ID, API HASH और BOT TOKEN लेने के लिए
-API_ID = int(input("28049056"))
-API_HASH = input("1a301acbe312e760b4d0716fd3b8eab2")
-BOT_TOKEN = input("7589052839:AAGPMVeZpb63GEG_xXzQEua1q9ewfNzTg50")
+API_ID = 28049056  # अपना API ID यहाँ डालें (Integer होना चाहिए)
+API_HASH = "1a301acbe312e760b4d0716fd3b8eab2"  # अपना API HASH यहाँ डालें
+BOT_TOKEN = "7589052839:AAGPMVeZpb63GEG_xXzQEua1q9ewfNzTg50"  # अपना BOT TOKEN यहाँ डालें
 
 # टाइमआउट वैल्यूज़
 TIMEOUT_OTP = 600  # 10 मिनट
