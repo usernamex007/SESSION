@@ -101,20 +101,20 @@ async def send_otp(client, message):
 
 async def validate_otp(client, message):
     session = session_data[message.chat.id]
-    client_obj, phone, otp = session["client_obj"], session["phone_number"], message.text
+    client_obj, phone, otp = session["client_obj"], session["phone_number"], session["otp"]
 
     try:
         if session["type"] == "Telethon":
-            await client_obj.sign_in(phone, session["phone_code_hash"], otp)  # ✅ Fixed for Telethon
+            await client_obj.sign_in(phone, session["phone_code_hash"], otp)  # ✅ Fixed Telethon OTP Handling
         else:
-            await client_obj.sign_in(phone_number=phone, phone_code=otp)  # ✅ Pyrogram
+            await client_obj.sign_in(phone_number=phone, phone_code=otp)  # ✅ Correct Pyrogram Handling
 
         if session["type"] == "Telethon":
             if await client_obj.is_user_authorized():
                 await generate_telethon_session(client, message)
             else:
                 session["stage"] = "2fa"
-                await message.reply("🔐 आपका अकाउंट **2-Step Verification** से सुरक्षित है। कृपया अपना **पासवर्ड** भेजें।")
+                await message.reply("🔐 आपका अकाउंट **2-Step Verification** से सुरक्षित है।\nकृपया अपना **पासवर्ड** भेजें।")
         else:
             await generate_pyrogram_session(client, message)
 
@@ -125,6 +125,7 @@ async def validate_otp(client, message):
         else:
             await message.reply(f"❌ **OTP Invalid:** {e}")
             del session_data[message.chat.id]
+
 
 async def validate_2fa(client, message):
     session = session_data[message.chat.id]
