@@ -66,6 +66,31 @@ async def handle_input(client, message):
         await message.reply("🔐 OTP भेजा जा रहा है, कृपया प्रतीक्षा करें...")
         await send_otp(client, message)
 
+async def send_otp(client, message):
+    session = session_data[message.chat.id]
+    api_id, api_hash, phone = session["api_id"], session["api_hash"], session["phone_number"]
+
+    if session["type"] == "Telethon":
+        client_obj = TelegramClient(StringSession(), api_id, api_hash)
+        await client_obj.connect()
+    else:
+        client_obj = Client("pyrogram_session", api_id=api_id, api_hash=api_hash)
+        await client_obj.connect()
+
+    try:
+        if session["type"] == "Telethon":
+            code = await client_obj.send_code_request(phone)
+        else:
+            await client_obj.send_code(phone)
+
+        session["client_obj"] = client_obj
+        session["stage"] = "otp"
+
+        await message.reply("🔢 कृपया **OTP** भेजें (Example: `12345`)।")
+    except Exception as e:
+        await message.reply(f"❌ Error: {e}")
+        del session_data[message.chat.id]
+    
     elif stage == "otp":
         session["otp"] = message.text
         await message.reply("✅ OTP Verify हो रहा है...")
