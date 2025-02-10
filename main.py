@@ -1,291 +1,161 @@
-import requests
+import asyncio
+import logging
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode, ChatType
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from pyrogram.errors import (
-    ApiIdInvalid,
-    PhoneNumberInvalid,
-    PhoneCodeInvalid,
-    PhoneCodeExpired,
-    SessionPasswordNeeded,
-    PasswordHashInvalid
-)
-from telethon.errors import (
-    ApiIdInvalidError,
-    PhoneNumberInvalidError,
-    PhoneCodeInvalidError,
-    PhoneCodeExpiredError,
-    SessionPasswordNeededError,
-    PasswordHashInvalidError
-)
-from asyncio.exceptions import TimeoutError
+from pyrogram.errors import *
+from telethon.errors import *
 from config import API_ID, API_HASH, BOT_TOKEN
 
-# Constants for timeouts
-TIMEOUT_OTP = 600  # 10 minutes
-TIMEOUT_2FA = 300  # 5 minutes
+# लॉगिंग सेटअप
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
+# सेशन डेटा स्टोरेज
 session_data = {}
 
+# Pyrogram क्लाइंट
+app = Client("sessionstring", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+
+# 🔹 सेशन हैंडलर सेटअप
 def setup_string_handler(app: Client):
-    @app.on_message(filters.command(["pyro", "tele"], prefixes=["/", "."]) & (filters.private | filters.group))
+    @app.on_message(filters.command(["pyro", "tele"]) & filters.private)
     async def session_setup(client, message: Message):
-        if message.chat.type in (ChatType.SUPERGROUP, ChatType.GROUP):
-            await message.reply("**❌ String Session Generator Only Works In Private Chats**", parse_mode=ParseMode.MARKDOWN)
-            return
-        
-        platform = "PyroGram" if message.command[0] == "pyro" else "Telethon"
-        await handle_start(client, message, platform)
+        platform = "Pyrogram" if message.command[0] == "pyro" else "Telethon"
+        await start_session(client, message, platform)
 
     @app.on_callback_query(filters.regex(r"^session_go_"))
-    async def callback_query_go_handler(client, callback_query):
-        await handle_callback_query(client, callback_query)
+    async def handle_callback(client, callback_query):
+        await process_callback(client, callback_query)
 
-    @app.on_callback_query(filters.regex(r"^session_resume_"))
-    async def callback_query_resume_handler(client, callback_query):
-        await handle_callback_query(client, callback_query)
+    @app.on_message(filters.text & filters.create(lambda _, __, msg: msg.chat.id in session_data))
+    async def handle_text(client, message: Message):
+        await process_text(client, message)
 
-    @app.on_callback_query(filters.regex(r"^session_close$"))
-    async def callback_query_close_handler(client, callback_query):
-        await handle_callback_query(client, callback_query)
-
-    @app.on_message(filters.text & filters.create(lambda _, __, message: message.chat.id in session_data))
-    async def text_handler(client, message: Message):
-        await handle_text(client, message)
-
-async def handle_start(client, message, platform):
-    session_type = "Telethon" if platform == "Telethon" else "Pyrogram"
-    session_data[message.chat.id] = {"type": session_type}
+async def start_session(client, message, platform):
+    chat_id = message.chat.id
+    session_data[chat_id] = {"type": platform, "stage": "api_id"}
+    
     await message.reply(
-        f"**Welcome to the {session_type} Session Setup!**\n"
-        "**━━━━━━━━━━━━━━━━━**\n"
-        "**This is a totally safe session string generator. We don't save any info that you will provide, so this is completely safe.**\n\n"
-        "**Steps to Generate Session String:**\n"
-        "1. You'll be asked to provide your **API ID**. You can obtain it from my.telegram.org.\n"
-        "2. Then, you'll need to provide your **API Hash**. Again, you can get it from my.telegram.org.\n"
-        "3. After that, you'll need to provide your **phone number** associated with your Telegram account.\n"
-        "4. You'll receive an OTP (One-Time Password) on your Telegram account. Please enter it when prompted.\n"
-        "5. If you have 2FA (Two-Factor Authentication) enabled, you will need to provide your password.\n\n"
-        "**Notes and Cautions:**\n"
-        "- **Do not share your session string with anyone.** It can be used to access your Telegram account.\n"
-        "- **Do not send the OTP directly in any other chat.** Doing so may result in your account being banned or you may face other issues logging in.\n"
-        "- **Ensure you provide accurate information.** Incorrect details may result in failed session generation.\n\n"
-        "**━━━━━━━━━━━━━━━━━**",
+        f"**Welcome to the {platform} Session Generator!**\n\n"
+        "🔹 **Steps:**\n"
+        "1️⃣ Send **API ID**\n"
+        "2️⃣ Send **API Hash**\n"
+        "3️⃣ Send **Phone Number**\n"
+        "4️⃣ Enter **OTP** sent to your Telegram\n"
+        "5️⃣ If 2FA enabled, enter **Password**\n\n"
+        "⚠️ **Do not share your session string with anyone!**",
         reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("🔄Update Channel", url="https://t.me/ModVipRM"),
-                InlineKeyboardButton("My Dev👨‍💻", user_id=7303810912)
-            ], [
-                InlineKeyboardButton("Go", callback_data=f"session_go_{session_type.lower()}"),
-                InlineKeyboardButton("Close", callback_data="session_close")
-            ]
+            [InlineKeyboardButton("Go", callback_data=f"session_go_{platform.lower()}")],
+            [InlineKeyboardButton("Close", callback_data="session_close")]
         ])
     )
 
-async def handle_callback_query(client, callback_query):
-    data = callback_query.data
+async def process_callback(client, callback_query):
     chat_id = callback_query.message.chat.id
+    data = callback_query.data
 
     if data == "session_close":
-        await callback_query.message.edit_text("Session generation process has been closed.")
-        if chat_id in session_data:
-            del session_data[chat_id]
+        await callback_query.message.edit_text("Session generation canceled.")
+        session_data.pop(chat_id, None)
         return
 
     if data.startswith("session_go_"):
-        session_type = data.split('_')[2]
-        await callback_query.message.edit_text(
-            "<b>Send Your API ID</b>",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Resume", callback_data=f"session_resume_{session_type}"),
-                InlineKeyboardButton("Close", callback_data="session_close")
-            ]]),
-            parse_mode=ParseMode.HTML
-        )
         session_data[chat_id]["stage"] = "api_id"
+        await callback_query.message.edit_text("<b>Send Your API ID</b>", parse_mode=ParseMode.HTML)
 
-    if data.startswith("session_resume_"):
-        session_type = data.split('_')[2]
-        await handle_start(client, callback_query.message, platform=session_type.capitalize())
-
-async def handle_text(client, message: Message):
+async def process_text(client, message: Message):
     chat_id = message.chat.id
-    if chat_id not in session_data:
-        return
-
-    session = session_data[chat_id]
+    session = session_data.get(chat_id, {})
     stage = session.get("stage")
 
     if stage == "api_id":
         try:
-            api_id = int(message.text)
-            session["api_id"] = api_id
-            await message.reply(
-                "<b>Send Your API Hash</b>",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("Resume", callback_data=f"session_resume_{session['type'].lower()}"),
-                    InlineKeyboardButton("Close", callback_data="session_close")
-                ]]),
-                parse_mode=ParseMode.HTML
-            )
+            session["api_id"] = int(message.text)
             session["stage"] = "api_hash"
+            await message.reply("<b>Send Your API Hash</b>", parse_mode=ParseMode.HTML)
         except ValueError:
-            await message.reply("Invalid API ID. Please enter a valid integer.")
+            await message.reply("❌ Invalid API ID. Please enter a valid integer.")
 
     elif stage == "api_hash":
         session["api_hash"] = message.text
-        await message.reply(
-            "<b>Send Your Phone Number\n[Example: +880xxxxxxxxxx]</b>",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Resume", callback_data=f"session_resume_{session['type'].lower()}"),
-                InlineKeyboardButton("Close", callback_data="session_close")
-            ]]),
-            parse_mode=ParseMode.HTML
-        )
         session["stage"] = "phone_number"
+        await message.reply("<b>Send Your Phone Number (Example: +91XXXXXXXXXX)</b>", parse_mode=ParseMode.HTML)
 
     elif stage == "phone_number":
         session["phone_number"] = message.text
-        otp_message = await message.reply("Sending OTP.....")
-        await send_otp(client, message, otp_message)
+        await message.reply("🔄 Sending OTP...")
+        await send_otp(client, message)
 
     elif stage == "otp":
-        otp = ''.join([char for char in message.text if char.isdigit()])
-        session["otp"] = otp
-        otp_message = await message.reply("Validating OTP.....")
-        await validate_otp(client, message, otp_message)
+        session["otp"] = ''.join(filter(str.isdigit, message.text))
+        await message.reply("🔄 Validating OTP...")
+        await validate_otp(client, message)
 
     elif stage == "2fa":
         session["password"] = message.text
         await validate_2fa(client, message)
 
-async def send_otp(client, message, otp_message):
-    session = session_data[message.chat.id]
-    api_id = session["api_id"]
-    api_hash = session["api_hash"]
-    phone_number = session["phone_number"]
+async def send_otp(client, message):
+    chat_id = message.chat.id
+    session = session_data[chat_id]
+    api_id, api_hash, phone = session["api_id"], session["api_hash"], session["phone_number"]
     telethon = session["type"] == "Telethon"
 
-    if telethon:
-        client_obj = TelegramClient(StringSession(), api_id, api_hash)
-    else:
-        client_obj = Client(":memory:", api_id, api_hash)
-
-    await client_obj.connect()
-
+    client_obj = TelegramClient(StringSession(), api_id, api_hash) if telethon else Client(":memory:", api_id, api_hash)
+    
     try:
-        if telethon:
-            code = await client_obj.send_code_request(phone_number)
-        else:
-            code = await client_obj.send_code(phone_number)
+        await client_obj.connect()
         session["client_obj"] = client_obj
-        session["code"] = code
+        if telethon:
+            await client_obj.send_code_request(phone)
+        else:
+            await client_obj.send_code(phone)
         session["stage"] = "otp"
-        await message.reply(
-            "<b>Send The OTP as text. Please send a text message embedding the OTP like: 'AB5 CD0 EF3 GH7 IJ6'</b>",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Resume", callback_data=f"session_resume_{session['type'].lower()}"),
-                InlineKeyboardButton("Close", callback_data="session_close")
-            ]]),
-            parse_mode=ParseMode.HTML
-        )
-        await otp_message.delete()
-    except (ApiIdInvalid, ApiIdInvalidError):
-        await message.reply('`API_ID` and `API_HASH` combination is invalid. Please start generating session again.', reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Resume", callback_data=f"session_resume_{session['type'].lower()}"), InlineKeyboardButton("Close", callback_data="session_close")]
-        ]))
-        await otp_message.delete()
-        return
-    except (PhoneNumberInvalid, PhoneNumberInvalidError):
-        await message.reply('`PHONE_NUMBER` is invalid. Please start generating session again.', reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Resume", callback_data=f"session_resume_{session['type'].lower()}"), InlineKeyboardButton("Close", callback_data="session_close")]
-        ]))
-        await otp_message.delete()
-        return
+        await message.reply("<b>Enter the OTP sent to your Telegram</b>", parse_mode=ParseMode.HTML)
+    except Exception as e:
+        logger.error(f"Error sending OTP: {e}")
+        await message.reply("❌ Error sending OTP. Please try again.")
 
-async def validate_otp(client, message, otp_message):
+async def validate_otp(client, message):
     session = session_data[message.chat.id]
-    client_obj = session["client_obj"]
-    phone_number = session["phone_number"]
-    otp = session["otp"]
-    code = session["code"]
+    client_obj, phone, otp = session["client_obj"], session["phone_number"], session["otp"]
     telethon = session["type"] == "Telethon"
 
     try:
         if telethon:
-            await client_obj.sign_in(phone_number, otp)
+            await client_obj.sign_in(phone, otp)
         else:
-            await client_obj.sign_in(phone_number, code.phone_code_hash, otp)
+            await client_obj.sign_in(phone, session["code"], otp)
         await generate_session(client, message)
-        await otp_message.delete()
-    except (PhoneCodeInvalid, PhoneCodeInvalidError):
-        await message.reply('OTP is invalid. Please start generating session again.', reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Resume", callback_data=f"session_resume_{session['type'].lower()}"), InlineKeyboardButton("Close", callback_data="session_close")]
-        ]))
-        await otp_message.delete()
-        return
-    except (PhoneCodeExpired, PhoneCodeExpiredError):
-        await message.reply('OTP is expired. Please start generating session again.', reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Resume", callback_data=f"session_resume_{session['type'].lower()}"), InlineKeyboardButton("Close", callback_data="session_close")]
-        ]))
-        await otp_message.delete()
-        return
-    except (SessionPasswordNeeded, SessionPasswordNeededError):
-        session["stage"] = "2fa"
-        await message.reply(
-            "<b>2FA Is Required To Login. Please Enter 2FA</b>",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("Resume", callback_data=f"session_resume_{session['type'].lower()}"),
-                InlineKeyboardButton("Close", callback_data="session_close")
-            ]]),
-            parse_mode=ParseMode.HTML
-        )
-        await otp_message.delete()
+    except Exception as e:
+        logger.error(f"OTP validation error: {e}")
+        await message.reply("❌ Invalid OTP. Please try again.")
 
 async def validate_2fa(client, message):
     session = session_data[message.chat.id]
-    client_obj = session["client_obj"]
-    password = session["password"]
-    telethon = session["type"] == "Telethon"
+    client_obj, password = session["client_obj"], session["password"]
 
     try:
-        if telethon:
-            await client_obj.sign_in(password=password)
-        else:
-            await client_obj.check_password(password=password)
+        await client_obj.sign_in(password=password)
         await generate_session(client, message)
-    except (PasswordHashInvalid, PasswordHashInvalidError):
-        await message.reply('Invalid Password Provided. Please start generating session again.', reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Resume", callback_data=f"session_resume_{session['type'].lower()}"), InlineKeyboardButton("Close", callback_data="session_close")]
-        ]))
-        return
+    except Exception as e:
+        logger.error(f"2FA validation error: {e}")
+        await message.reply("❌ Invalid Password. Please try again.")
 
 async def generate_session(client, message):
     session = session_data[message.chat.id]
-    client_obj = session["client_obj"]
-    telethon = session["type"] == "Telethon"
+    client_obj, telethon = session["client_obj"], session["type"] == "Telethon"
 
-    if telethon:
-        string_session = client_obj.session.save()
-    else:
-        string_session = await client_obj.export_session_string()
-
-    text = f"**{session['type'].upper()} SESSION FROM Smart Tool**:\n\n`{string_session}`\n\nGenerated by @ItsSmartToolBot"
-
-    try:
-        await client_obj.send_message("me", text)
-    except KeyError:
-        pass
-
+    session_string = client_obj.session.save() if telethon else await client_obj.export_session_string()
+    await client_obj.send_message("me", f"**Your {session['type']} session:**\n\n`{session_string}`\n\n⚠️ **Keep it safe!**")
+    
     await client_obj.disconnect()
-    await message.reply("<b>This string has been saved ✅ in your Saved Messages</b>", parse_mode=ParseMode.HTML)
-    del session_data[message.chat.id]
+    await message.reply("✅ Session saved in your **Saved Messages**!", parse_mode=ParseMode.HTML)
+    session_data.pop(message.chat.id, None)
 
-# Initialize the Pyrogram Client
-app = Client("sessionstring", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
-
+# बॉट स्टार्ट करें
 setup_string_handler(app)
-
 app.run()
