@@ -75,56 +75,31 @@ async def handle_input(client, message):
         session["password"] = message.text
         await validate_2fa(client, message)
 
-async def send_otp(client, message):
-    session = session_data[message.chat.id]
-    api_id, api_hash, phone = session["api_id"], session["api_hash"], session["phone_number"]
-
-    if session["type"] == "Telethon":
-        client_obj = TelegramClient(StringSession(), api_id, api_hash)
-        await client_obj.connect()
-    else:
-        client_obj = Client("pyrogram_session", api_id=api_id, api_hash=api_hash, phone_number=phone)
-        await client_obj.connect()
-
-    try:
-        if session["type"] == "Telethon":
-            code = await client_obj.send_code_request(phone)
-        else:
-            await client_obj.send_code(phone)
-
-        session["client_obj"] = client_obj
-        session["stage"] = "otp"
-
-        await message.reply("🔢 कृपया **OTP** भेजें (Example: `12345`)।")
-    except Exception as e:
-        await message.reply(f"❌ Error: {e}")
-        del session_data[message.chat.id]
-
 async def validate_otp(client, message):
     session = session_data[message.chat.id]
     client_obj, phone, otp = session["client_obj"], session["phone_number"], session["otp"]
 
     try:
         if session["type"] == "Telethon":
-            await client_obj.sign_in(phone, otp)
+            await client_obj.sign_in(phone, otp)  # ✅ Telethon में सही तरीका
         else:
-            await client_obj.sign_in(phone_number=phone, code=otp)
+            await client_obj.sign_in(phone_number=phone, phone_code=otp)  # ✅ Pyrogram में सही तरीका
 
         if session["type"] == "Telethon":
             if await client_obj.is_user_authorized():
                 await generate_telethon_session(client, message)
             else:
                 session["stage"] = "2fa"
-                await message.reply("🔐 आपका अकाउंट 2-Step Verification से सुरक्षित है। कृपया अपना **पासवर्ड** भेजें।")
+                await message.reply("🔐 आपका अकाउंट **2-Step Verification** से सुरक्षित है।\nकृपया अपना **पासवर्ड** भेजें।")
         else:
             await generate_pyrogram_session(client, message)
 
     except Exception as e:
-        if "SESSION_PASSWORD_NEEDED" in str(e):
+        if "SESSION_PASSWORD_NEEDED" in str(e) or "Two-steps verification is enabled" in str(e):
             session["stage"] = "2fa"
-            await message.reply("🔐 Two-Step Verification Enabled!\nकृपया अपना **2FA पासवर्ड** भेजें।")
+            await message.reply("🔐 **Two-Step Verification Enabled!**\nकृपया अपना **2FA पासवर्ड** भेजें।")
         else:
-            await message.reply(f"❌ OTP Invalid: {e}")
+            await message.reply(f"❌ **OTP Invalid:** {e}")
             del session_data[message.chat.id]
 
 async def validate_2fa(client, message):
