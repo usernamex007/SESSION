@@ -92,7 +92,6 @@ async def send_otp(client, message):
     except Exception as e:
         await message.reply(f"❌ Error: {e}")
         del session_data[message.chat.id]
-
 async def validate_otp(client, message):
     session = session_data[message.chat.id]
     client_obj, phone, otp = session["client_obj"], session["phone_number"], session["otp"]
@@ -109,7 +108,7 @@ async def validate_otp(client, message):
     except Exception as e:
         if "SESSION_PASSWORD_NEEDED" in str(e):
             session["stage"] = "2fa"
-            await message.reply("🔐 आपका अकाउंट 2-Step Verification से सुरक्षित है। कृपया अपना **पासवर्ड** भेजें।")
+            await message.reply("🔐 Two-Step Verification Enabled!\nकृपया अपना **2FA पासवर्ड** भेजें।")
         else:
             await message.reply(f"❌ OTP Invalid: {e}")
             del session_data[message.chat.id]
@@ -123,7 +122,7 @@ async def validate_2fa(client, message):
         await generate_session(client, message)
     except Exception as e:
         await message.reply(f"❌ 2FA पासवर्ड गलत है: {e}\n\n⚠ कृपया सही पासवर्ड भेजें।")
-
+        
 async def generate_session(client, message):
     session = session_data[message.chat.id]
     client_obj = session["client_obj"]
