@@ -5,7 +5,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from pyrogram.errors import SessionPasswordNeeded
-from telethon.errors import SessionPasswordNeededError
+from telethon.errors import SessionPasswordNeededError, PhoneCodeExpiredError, PhoneCodeInvalidError
 
 # 🔹 API Details
 API_ID = 28049056
@@ -118,12 +118,19 @@ async def validate_otp(client, message):
 
         await generate_session(client, message)
 
+    except PhoneCodeExpiredError:
+        await message.reply("❌ **OTP Expired!** नया कोड भेजा जा रहा है...")
+        await send_otp(client, message)
+
+    except PhoneCodeInvalidError:
+        await message.reply("❌ **गलत OTP! कृपया सही OTP भेजें।**")
+
     except (SessionPasswordNeededError, SessionPasswordNeeded):
         session["stage"] = "2fa"
         await message.reply("🔐 **2FA पासवर्ड भेजें।**\n\nआपके अकाउंट में **Two-Step Verification (2FA)** ऑन है। कृपया अपना **पासवर्ड** भेजें।")
 
     except Exception as e:
-        await message.reply(f"❌ **OTP Invalid:** `{str(e)}`")
+        await message.reply(f"❌ **OTP Error:** `{str(e)}`")
         del session_data[chat_id]
 
 # 📌 2FA पासवर्ड वेरिफाई करना
