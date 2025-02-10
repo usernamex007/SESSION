@@ -67,6 +67,8 @@ async def handle_input(client, message):
         await send_otp(client, message)
 
     elif stage == "otp":
+        session["otp"] = message.text  # ✅ FIXED - OTP स्टोर कर रहे हैं
+        await message.reply("✅ OTP Verify हो रहा है...")
         await validate_otp(client, message)
 
     elif stage == "2fa":
@@ -81,13 +83,13 @@ async def send_otp(client, message):
         client_obj = TelegramClient(StringSession(), api_id, api_hash)
         await client_obj.connect()
     else:
-        client_obj = Client("pyrogram_session", api_id=api_id, api_hash=api_hash)
+        client_obj = Client("pyrogram_session", api_id=api_id, api_hash=api_hash, phone_number=phone)
         await client_obj.connect()
 
     try:
         if session["type"] == "Telethon":
-            sent_code = await client_obj.send_code_request(phone)
-            session["phone_code_hash"] = sent_code.phone_code_hash  # ✅ Save phone_code_hash
+            code = await client_obj.send_code_request(phone)
+            session["phone_code_hash"] = code.phone_code_hash  # ✅ FIXED - Storing phone_code_hash
         else:
             await client_obj.send_code(phone)
 
@@ -101,13 +103,13 @@ async def send_otp(client, message):
 
 async def validate_otp(client, message):
     session = session_data[message.chat.id]
-    client_obj, phone, otp = session["client_obj"], session["phone_number"], session["otp"]
+    client_obj, phone, otp = session["client_obj"], session["phone_number"], message.text  # ✅ FIXED - Taking OTP from message
 
     try:
         if session["type"] == "Telethon":
-            await client_obj.sign_in(phone, session["phone_code_hash"], otp)  # ✅ Fixed Telethon OTP Handling
+            await client_obj.sign_in(phone, session["phone_code_hash"], otp)  # ✅ Now using phone_code_hash
         else:
-            await client_obj.sign_in(phone_number=phone, phone_code=otp)  # ✅ Correct Pyrogram Handling
+            await client_obj.sign_in(phone_number=phone, phone_code=otp)
 
         if session["type"] == "Telethon":
             if await client_obj.is_user_authorized():
@@ -125,7 +127,6 @@ async def validate_otp(client, message):
         else:
             await message.reply(f"❌ **OTP Invalid:** {e}")
             del session_data[message.chat.id]
-
 
 async def validate_2fa(client, message):
     session = session_data[message.chat.id]
