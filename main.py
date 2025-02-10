@@ -103,11 +103,14 @@ async def send_otp(client, message):
 
 async def validate_otp(client, message):
     session = session_data[message.chat.id]
-    client_obj, phone, otp = session["client_obj"], session["phone_number"], message.text  # ✅ FIXED - Taking OTP from message
+    client_obj = session["client_obj"]
+    phone = session["phone_number"]
+    otp = message.text  # ✅ FIXED - Taking OTP from message
 
     try:
         if session["type"] == "Telethon":
-            await client_obj.sign_in(phone, session["phone_code_hash"], otp)  # ✅ Now using phone_code_hash
+            phone_code_hash = session["phone_code_hash"]  # ✅ FIXED - Using stored phone_code_hash
+            await client_obj.sign_in(phone, phone_code_hash, otp)  # ✅ FIXED - Now using phone_code_hash
         else:
             await client_obj.sign_in(phone_number=phone, phone_code=otp)
 
@@ -127,6 +130,7 @@ async def validate_otp(client, message):
         else:
             await message.reply(f"❌ **OTP Invalid:** {e}")
             del session_data[message.chat.id]
+
 
 async def validate_2fa(client, message):
     session = session_data[message.chat.id]
